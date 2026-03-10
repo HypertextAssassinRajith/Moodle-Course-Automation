@@ -404,31 +404,97 @@ def add_quiz(course_id: int, section_num: int, quiz_name: str) -> int | None:
 def add_label(course_id: int, section_num: int, label_html: str):
     url = f"{MOODLE_BASE}/course/modedit.php?add=label&course={course_id}&section={section_num}&return=0"
     driver.get(url)
-    time.sleep(1)
+    time.sleep(2)
 
-    # The label editor field – try multiple approaches
+    # Strategy: set the hidden textarea value directly (this is what Moodle submits),
+    # then also try to update the visual editor so the content is visible.
+    # The textarea is always present as id_introeditor[text] or similar.
+
+    editor_filled = False
+
+    # Approach 1: TinyMCE (Moodle 4.x default) – use its JS API
     try:
-        # Atto editor: contenteditable div
-        editor = wait.until(EC.presence_of_element_located(
-            (By.CSS_SELECTOR, "[id^='id_introeditor'] [contenteditable='true'], .editor_atto_content")
-        ))
-        driver.execute_script("arguments[0].innerHTML = arguments[1];", editor, label_html)
+        result = driver.execute_script("""
+            // Try TinyMCE API first
+            if (typeof tinymce !== 'undefined' && tinymce.editors.length > 0) {
+                var editor = tinymce.editors[0];
+                editor.setContent(arguments[0]);
+                editor.save();  // sync to textarea
+                return 'tinymce';
+            }
+            return null;
+        """, label_html)
+        if result == 'tinymce':
+            editor_filled = True
+            time.sleep(0.5)
     except Exception:
+        pass
+
+    # Approach 2: TinyMCE iframe – set innerHTML + sync textarea manually
+    if not editor_filled:
         try:
-            # TinyMCE: switch to iframe
-            iframe = driver.find_element(By.CSS_SELECTOR, "#id_introeditor_ifr, .tox-edit-area__iframe")
+            iframe = driver.find_element(By.CSS_SELECTOR,
+                "iframe[id$='_ifr'], .tox-edit-area__iframe, #id_introeditoreditable_ifr"
+            )
             driver.switch_to.frame(iframe)
             body = driver.find_element(By.TAG_NAME, "body")
             driver.execute_script("arguments[0].innerHTML = arguments[1];", body, label_html)
             driver.switch_to.default_content()
+            # Also set the hidden textarea
+            driver.execute_script("""
+                var ta = document.querySelector('textarea[name="introeditor[text]"]')
+                         || document.getElementById('id_introeditoreditable');
+                if (ta) { ta.value = arguments[0]; ta.innerHTML = arguments[0]; }
+            """, label_html)
+            editor_filled = True
+            time.sleep(0.5)
         except Exception:
-            try:
-                # Plain textarea fallback
-                ta = driver.find_element(By.ID, "id_introeditor")
-                ta.clear()
-                ta.send_keys(label_html)
-            except Exception:
-                print("   ⚠️  Could not fill label editor")
+            driver.switch_to.default_content()
+
+    # Approach 3: Atto editor – set contenteditable + sync textarea
+    if not editor_filled:
+        try:
+            editor = driver.find_element(By.CSS_SELECTOR,
+                ".editor_atto_content[contenteditable='true'], "
+                "[id^='id_introeditor'] [contenteditable='true']"
+            )
+            driver.execute_script("arguments[0].innerHTML = arguments[1];", editor, label_html)
+            # Sync to the hidden textarea
+            driver.execute_script("""
+                var ta = document.querySelector('textarea[name="introeditor[text]"]');
+                if (ta) { ta.value = arguments[0]; }
+            """, label_html)
+            editor_filled = True
+            time.sleep(0.5)
+        except Exception:
+            pass
+
+    # Approach 4: Direct textarea fallback (plain text editor or last resort)
+    if not editor_filled:
+        try:
+            # Set the hidden textarea directly via JS (works even if not visible)
+            driver.execute_script("""
+                var ta = document.querySelector('textarea[name="introeditor[text]"]');
+                if (!ta) ta = document.getElementById('id_introeditor');
+                if (!ta) ta = document.querySelector('textarea[id*="introeditor"]');
+                if (ta) {
+                    ta.value = arguments[0];
+                    ta.dispatchEvent(new Event('change', {bubbles: true}));
+                }
+            """, label_html)
+            editor_filled = True
+            time.sleep(0.5)
+        except Exception:
+            print("   ⚠️  Could not fill label editor")
+
+    # Also ensure the format is set to HTML (1) not plain text
+    try:
+        driver.execute_script("""
+            var fmt = document.querySelector('select[name="introeditor[format]"]');
+            if (fmt) { fmt.value = '1'; }  // 1 = HTML format
+        """)
+    except Exception:
+        pass
 
     # Save
     try:
@@ -436,7 +502,7 @@ def add_label(course_id: int, section_num: int, label_html: str):
     except Exception:
         save_btn = driver.find_element(By.ID, "id_submitbutton")
     driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", save_btn)
-    time.sleep(0.3)
+    time.sleep(0.5)
     driver.execute_script("arguments[0].click();", save_btn)
 
     wait.until(EC.url_contains("/course/view.php"))
@@ -973,14 +1039,13 @@ try:
         if sec["yt_link"]:
             yt_id = extract_youtube_id(sec["yt_link"])
             if yt_id:
+                # Use a plain YouTube URL — Moodle's multimedia filter auto-embeds it.
+                # <iframe> tags get stripped by Moodle's HTML sanitizer, so we use
+                # an <a> link with the video URL. Moodle converts it to an embedded player.
+                yt_url = f'https://www.youtube.com/watch?v={yt_id}'
                 html = (
                     f'<p>ප්‍රශ්නාවලිය {i:02d} සඳහා video පාඩම</p>'
-                    f'<div class="embed-responsive embed-responsive-16by9">'
-                    f'<iframe src="https://www.youtube.com/embed/{yt_id}" '
-                    f'width="560" height="315" frameborder="0" '
-                    f'allow="accelerometer; autoplay; clipboard-write; '
-                    f'encrypted-media; gyroscope; picture-in-picture" '
-                    f'allowfullscreen></iframe></div>'
+                    f'<p><a href="{yt_url}">{yt_url}</a></p>'
                 )
             else:
                 html = f'<p><a href="{sec["yt_link"]}" target="_blank">{sec["yt_link"]}</a></p>'
