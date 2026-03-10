@@ -26,6 +26,8 @@ MOODLE_BASE = "http://localhost"  # local testing; change to "https://samanalaes
 ADMIN_USER = "admin"          # ← your Moodle admin username
 ADMIN_PASS = "Sanjaya11@"  # ← your Moodle admin password
 WAIT = 20  # max seconds to wait for page elements
+QUIZ_FOLDER = r'C:\Users\Rajith Sanjaya\OneDrive\Ganith Gatalu\2026\feb\LMS\G4'
+QUIZ_XML_PREFIX = "GG2602G04P"  # files are GG2602G04P01.xml, GG2602G04P02.xml, …
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -298,7 +300,8 @@ def create_section(course_id: int, section_num: int, new_name: str):
 #   /course/modedit.php?add=<modtype>&course=<id>&section=<num>&return=0
 # This skips the chooser dialog entirely.
 
-def add_quiz(course_id: int, section_num: int, quiz_name: str):
+def add_quiz(course_id: int, section_num: int, quiz_name: str) -> int | None:
+    """Create a quiz and click 'Save and display'. Returns the cmid from the URL."""
     url = f"{MOODLE_BASE}/course/modedit.php?add=quiz&course={course_id}&section={section_num}&return=0"
     driver.get(url)
 
@@ -306,18 +309,21 @@ def add_quiz(course_id: int, section_num: int, quiz_name: str):
     name_field.clear()
     name_field.send_keys(quiz_name)
 
-    # Scroll to save button and click via JS to avoid interception
-    try:
-        save_btn = driver.find_element(By.ID, "id_submitbutton2")
-    except Exception:
-        save_btn = driver.find_element(By.ID, "id_submitbutton")
+    # Click "Save and display" (id_submitbutton) instead of "Save and return to course"
+    save_btn = driver.find_element(By.ID, "id_submitbutton")
     driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", save_btn)
     time.sleep(0.3)
     driver.execute_script("arguments[0].click();", save_btn)
 
-    wait.until(EC.url_contains("/course/view.php"))
-    time.sleep(0.5)
-    print(f"   ✅ Quiz '{quiz_name}' added")
+    # Wait for the quiz view page to load
+    wait.until(EC.url_contains("/mod/quiz/view.php"))
+    time.sleep(1)
+
+    # Extract cmid from URL (e.g. /mod/quiz/view.php?id=1233)
+    cmid_match = re.search(r"id=(\d+)", driver.current_url)
+    cmid = int(cmid_match.group(1)) if cmid_match else None
+    print(f"   ✅ Quiz '{quiz_name}' added (cmid={cmid})")
+    return cmid
 
 
 def add_label(course_id: int, section_num: int, label_html: str):
@@ -363,6 +369,225 @@ def add_label(course_id: int, section_num: int, label_html: str):
     print(f"   ✅ Label (YouTube video) added")
 
 
+# ─── Step 6: Import questions from XML via Question Bank tab ──────────────────
+
+def import_questions_from_xml(cmid: int, xml_path: str):
+    """Navigate to quiz → Question bank tab → Import dropdown → upload XML."""
+    # Go to the quiz view page
+    driver.get(f"{MOODLE_BASE}/mod/quiz/view.php?id={cmid}")
+    time.sleep(1)
+
+    # Click the "Question bank" tab
+    try:
+        qb_tab = wait.until(EC.element_to_be_clickable(
+            (By.XPATH,
+             "//a[contains(text(),'Question bank')] | "
+             "//a[contains(@href,'question/edit.php')]")
+        ))
+        driver.execute_script("arguments[0].click();", qb_tab)
+        time.sleep(1)
+    except Exception:
+        # Direct fallback: go to question bank page
+        driver.get(f"{MOODLE_BASE}/question/edit.php?cmid={cmid}")
+        time.sleep(1)
+
+    # Select "Import" from the question bank dropdown
+    try:
+        qb_select = wait.until(EC.presence_of_element_located(
+            (By.CSS_SELECTOR, "select.urlselect[name='jump']")
+        ))
+        import_option_value = None
+        for opt in qb_select.find_elements(By.TAG_NAME, "option"):
+            if "import" in opt.get_attribute("value").lower():
+                import_option_value = opt.get_attribute("value")
+                break
+
+        if import_option_value:
+            sel = Select(qb_select)
+            sel.select_by_value(import_option_value)
+            time.sleep(1)
+            # The urlselect triggers navigation automatically, but just in case:
+            if "import" not in driver.current_url.lower():
+                driver.get(f"{MOODLE_BASE}{import_option_value}")
+                time.sleep(1)
+        else:
+            # Fallback: navigate directly
+            driver.get(f"{MOODLE_BASE}/question/bank/importquestions/import.php?cmid={cmid}")
+            time.sleep(1)
+    except Exception:
+        driver.get(f"{MOODLE_BASE}/question/bank/importquestions/import.php?cmid={cmid}")
+        time.sleep(1)
+
+    # Select "Moodle XML format"
+    try:
+        fmt_radio = wait.until(EC.presence_of_element_located(
+            (By.CSS_SELECTOR, "input[name='format'][value='xml']")
+        ))
+        driver.execute_script("arguments[0].click();", fmt_radio)
+        time.sleep(0.3)
+    except Exception:
+        # Try selecting from a dropdown if it's not radio buttons
+        try:
+            sel = Select(driver.find_element(By.ID, "id_format"))
+            sel.select_by_value("xml")
+        except Exception:
+            print(f"   ⚠️  Could not select XML format")
+            return False
+
+    # Upload the file via "Choose a file..." button → Moodle file picker
+    try:
+        # Click the "Choose a file..." button to open the file picker dialog
+        choose_btn = wait.until(EC.element_to_be_clickable(
+            (By.CSS_SELECTOR, "input.fp-btn-choose[type='button']")
+        ))
+        driver.execute_script("arguments[0].click();", choose_btn)
+        time.sleep(2)
+
+        # In the file picker dialog, click "Upload a file" in the left panel
+        upload_link = wait.until(EC.element_to_be_clickable(
+            (By.XPATH,
+             "//span[contains(@class,'fp-repo-name') and contains(text(),'Upload a file')] | "
+             "//a[contains(@class,'fp-repo-name') and contains(text(),'Upload a file')] | "
+             "//span[contains(text(),'Upload a file')]")
+        ))
+        driver.execute_script("arguments[0].click();", upload_link)
+        time.sleep(1)
+
+        # Find the actual file input inside the file picker dialog and send the file path
+        file_input = wait.until(EC.presence_of_element_located(
+            (By.CSS_SELECTOR, ".fp-upload-form input[type='file'], .file-picker input[type='file'], input[type='file'][name='repo_upload_file']")
+        ))
+        file_input.send_keys(xml_path)
+        time.sleep(2)
+
+        # Click "Upload this file" button in the dialog
+        upload_btn = wait.until(EC.element_to_be_clickable(
+            (By.CSS_SELECTOR, ".fp-upload-btn, .fp-upload-form .btn-primary")
+        ))
+        driver.execute_script("arguments[0].click();", upload_btn)
+        time.sleep(3)
+    except Exception:
+        # Last resort: try to find any hidden file input on the page
+        try:
+            file_input = driver.find_element(By.CSS_SELECTOR, "input[type='file']")
+            file_input.send_keys(xml_path)
+            time.sleep(3)
+        except Exception:
+            print(f"   ⚠️  Could not upload file")
+            return False
+
+    # Click the Import button
+    try:
+        import_btn = driver.find_element(By.ID, "id_submitbutton")
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", import_btn)
+        time.sleep(0.3)
+        driver.execute_script("arguments[0].click();", import_btn)
+        time.sleep(3)
+    except Exception:
+        print(f"   ⚠️  Could not click Import button")
+        return False
+
+    # After import, Moodle shows a results page with a "Continue" button
+    try:
+        continue_btn = wait.until(EC.element_to_be_clickable(
+            (By.XPATH, "//button[contains(text(),'Continue')] | //a[contains(text(),'Continue')] | //input[@value='Continue']")
+        ))
+        driver.execute_script("arguments[0].click();", continue_btn)
+        time.sleep(1)
+    except Exception:
+        pass  # May not always have a continue button
+
+    print(f"   ✅ Questions imported from {os.path.basename(xml_path)}")
+    return True
+
+
+# ─── Step 7: Add all imported questions to a quiz ────────────────────────────
+
+def add_all_questions_to_quiz(cmid: int):
+    """Go to Questions tab (quiz edit page), click Add → from question bank,
+    select all questions and add them to the quiz."""
+
+    # Navigate directly to the quiz edit page using cmid
+    driver.get(f"{MOODLE_BASE}/mod/quiz/edit.php?cmid={cmid}")
+    time.sleep(1)
+
+    # Click the "Add" dropdown button
+    try:
+        add_dropdown = wait.until(EC.element_to_be_clickable(
+            (By.CSS_SELECTOR,
+             "a.dropdown-toggle[aria-label='Add'], "
+             "#action-menu-toggle-1, "
+             ".add-menu-outer a.dropdown-toggle")
+        ))
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", add_dropdown)
+        time.sleep(0.3)
+        driver.execute_script("arguments[0].click();", add_dropdown)
+        time.sleep(1)
+    except Exception:
+        print(f"   ⚠️  Could not find 'Add' dropdown")
+        return
+
+    # Click "from question bank" in the dropdown menu
+    try:
+        from_bank = wait.until(EC.element_to_be_clickable(
+            (By.CSS_SELECTOR,
+             "a[data-action='questionbank'], "
+             "a.questionbank.menu-action")
+        ))
+        driver.execute_script("arguments[0].click();", from_bank)
+        time.sleep(2)
+    except Exception:
+        print(f"   ⚠️  Could not find 'from question bank' option")
+        return
+
+    # Select all questions using the "select all" checkbox
+    try:
+        select_all = wait.until(EC.presence_of_element_located(
+            (By.CSS_SELECTOR,
+             "input[name='selectall'], "
+             "th input[type='checkbox'], "
+             "#qbheadercheckbox, "
+             ".checkbox-toggle-all input[type='checkbox']")
+        ))
+        if not select_all.is_selected():
+            driver.execute_script("arguments[0].click();", select_all)
+            time.sleep(0.5)
+    except Exception:
+        # Try selecting individual question checkboxes
+        try:
+            checkboxes = driver.find_elements(
+                By.CSS_SELECTOR,
+                "input[type='checkbox'][name^='q'], "
+                "td input[type='checkbox']"
+            )
+            for cb in checkboxes:
+                if not cb.is_selected():
+                    driver.execute_script("arguments[0].click();", cb)
+            time.sleep(0.5)
+        except Exception:
+            print(f"   ⚠️  Could not select questions")
+            return
+
+    # Click "Add selected questions to the quiz"
+    try:
+        add_btn = wait.until(EC.element_to_be_clickable(
+            (By.XPATH,
+             "//input[@value='Add selected questions to the quiz'] | "
+             "//button[contains(text(),'Add selected questions')] | "
+             "//input[contains(@value,'Add to quiz')] | "
+             "//button[contains(text(),'Add to quiz')]")
+        ))
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", add_btn)
+        time.sleep(0.3)
+        driver.execute_script("arguments[0].click();", add_btn)
+        time.sleep(2)
+    except Exception:
+        print(f"   ⚠️  Could not add questions to quiz")
+        return
+
+    print(f"   ✅ All questions added to quiz")
+
+
 # ─── Run ─────────────────────────────────────────────────────────────────────
 try:
     moodle_login()
@@ -373,7 +598,15 @@ try:
         print(f"\n📂 Section {i:02d}: {sec['name']}")
 
         create_section(course_id, i, sec["name"])
-        add_quiz(course_id, i, f"ප්‍රශ්නාවලිය {i:02d}")
+        cmid = add_quiz(course_id, i, f"ප්‍රශ්නාවලිය {i:02d}")
+
+        # Import questions from XML and add to quiz
+        xml_file = os.path.join(QUIZ_FOLDER, f"{QUIZ_XML_PREFIX}{i:02d}.xml")
+        if cmid and os.path.isfile(xml_file):
+            if import_questions_from_xml(cmid, xml_file):
+                add_all_questions_to_quiz(cmid)
+        elif not os.path.isfile(xml_file):
+            print(f"   ⚠️  XML file not found: {os.path.basename(xml_file)}")
 
         if sec["yt_link"]:
             yt_id = extract_youtube_id(sec["yt_link"])
