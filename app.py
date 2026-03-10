@@ -130,18 +130,26 @@ def create_course() -> int:
     sn.clear()
     sn.send_keys(course_shortname)
 
-    # Expand "Course format" and set number of sections
+    # Scroll to the "Course format" fieldset and expand it
     try:
-        header = driver.find_element(By.XPATH, "//*[contains(@id,'courseformat')]//a | //*[contains(@id,'courseformat')]/..")
-        if header.get_attribute("aria-expanded") == "false":
-            driver.execute_script("arguments[0].click();", header)
-            time.sleep(0.5)
+        fieldset = driver.find_element(By.ID, "id_courseformathdr")
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", fieldset)
+        time.sleep(0.5)
+
+        # Click the collapsed toggle link to expand the section
+        toggle = fieldset.find_element(
+            By.CSS_SELECTOR,
+            "a[data-bs-toggle='collapse'][aria-expanded='false']"
+        )
+        driver.execute_script("arguments[0].click();", toggle)
+        time.sleep(1)
     except Exception:
         pass
 
+    # Set number of sections to 0 (sections will be added dynamically later)
     try:
         sel = Select(driver.find_element(By.ID, "id_numsections"))
-        sel.select_by_value(str(num_sections))
+        sel.select_by_value("0")
     except Exception:
         pass
 
