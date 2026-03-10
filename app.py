@@ -48,6 +48,7 @@ print("════════════════════════�
 course_fullname = '04 ශ්‍රේණිය ගණිත ගැටලු Module 2'
 course_shortname = '4 ගණිත ගැටලු Module 2'
 csv_file = 'Ganith Gatalu Feb - Module 2.csv'
+category='2026/Grade 04/ගණිතය'
 
 # course_fullname = input("Course full name: ").strip()
 # course_shortname = input("Course short name (unique code): ").strip()
@@ -120,9 +121,82 @@ def moodle_login():
 
 # ─── Step 2: Create course ──────────────────────────────────────────────────
 
+def select_category_autocomplete():
+    """Select the category from Moodle's autocomplete dropdown widget.
+    
+    The widget structure (IDs are dynamic per page load):
+      <input data-fieldtype="autocomplete" role="combobox" ...>
+      <span class="form-autocomplete-downarrow ...">▼</span>
+    Clicking the ▼ opens:
+      <ul class="form-autocomplete-suggestions" role="listbox">
+        <li role="option" data-value="10">2026 / Grade 04 / ගණිතය</li>
+        ...
+      </ul>
+    We match by normalising whitespace around '/' separators.
+    """
+    # Build a normalised version of the target path for comparison
+    target_parts = [p.strip() for p in category.split("/")]
+    target_norm = " / ".join(target_parts).lower()
+
+    try:
+        # Click the ▼ arrow to open the full suggestions list
+        arrow = wait.until(EC.element_to_be_clickable(
+            (By.CSS_SELECTOR, "span.form-autocomplete-downarrow")
+        ))
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", arrow)
+        time.sleep(0.3)
+        driver.execute_script("arguments[0].click();", arrow)
+        time.sleep(1)
+
+        # Find all <li role="option"> in the suggestions list
+        options = wait.until(EC.presence_of_all_elements_located(
+            (By.CSS_SELECTOR, "ul.form-autocomplete-suggestions li[role='option']")
+        ))
+
+        for opt in options:
+            opt_text = " ".join(opt.text.split()).strip()  # collapse whitespace
+            opt_norm = opt_text.lower()
+            if target_norm == opt_norm:
+                # Exact match – click this option
+                driver.execute_script("arguments[0].click();", opt)
+                time.sleep(0.5)
+                print(f"   📁 Category selected: {opt_text}")
+                return True
+
+        # No exact match – try partial (target contained in option text)
+        for opt in options:
+            opt_text = " ".join(opt.text.split()).strip()
+            opt_norm = opt_text.lower()
+            if target_norm in opt_norm or opt_norm in target_norm:
+                driver.execute_script("arguments[0].click();", opt)
+                time.sleep(0.5)
+                print(f"   📁 Category selected: {opt_text}")
+                return True
+
+        # Last resort – match by data-value using JS to find the right option
+        # and click it programmatically
+        leaf = target_parts[-1].lower()
+        for opt in options:
+            opt_text = " ".join(opt.text.split()).strip().lower()
+            if leaf in opt_text:
+                driver.execute_script("arguments[0].click();", opt)
+                time.sleep(0.5)
+                print(f"   📁 Category selected (leaf match): {opt.text.strip()}")
+                return True
+
+    except Exception as e:
+        print(f"   ⚠️  Category autocomplete error: {e}")
+
+    print(f"   ⚠️  Could not select category '{category}' – using default")
+    return False
+
+
 def create_course() -> int:
     driver.get(f"{MOODLE_BASE}/course/edit.php?category=1")
     wait.until(EC.presence_of_element_located((By.ID, "id_fullname")))
+
+    # Select category from the autocomplete dropdown widget
+    select_category_autocomplete()
 
     fn = driver.find_element(By.ID, "id_fullname")
     fn.clear()
