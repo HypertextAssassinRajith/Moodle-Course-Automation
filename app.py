@@ -22,8 +22,8 @@ from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 
 # ─── Configuration ───────────────────────────────────────────────────────────
-MOODLE_BASE = "https://samanalaeschool.lk"  # local testing; change to "https://samanalaeschool.lk" for production
-ADMIN_USER = "rajith"          # ← your Moodle admin username
+MOODLE_BASE = "http://localhost"  # local testing; change to "https://samanalaeschool.lk" for production
+ADMIN_USER = "admin"          # ← your Moodle admin username
 ADMIN_PASS = "Sanjaya11@"  # ← your Moodle admin password
 WAIT = 20  # max seconds to wait for page elements
 QUIZ_FOLDER = r'C:\Users\Rajith Sanjaya\OneDrive\Ganith Gatalu\2026\feb\LMS\G4'
