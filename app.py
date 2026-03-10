@@ -22,12 +22,16 @@ from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 
 # ─── Configuration ───────────────────────────────────────────────────────────
-MOODLE_BASE = "http://localhost"  # local testing; change to "https://samanalaeschool.lk" for production
-ADMIN_USER = "admin"          # ← your Moodle admin username
+MOODLE_BASE = "https://samanalaeschool.lk"  # local testing; change to "https://samanalaeschool.lk" for production
+ADMIN_USER = "rajith"          # ← your Moodle admin username
 ADMIN_PASS = "Sanjaya11@"  # ← your Moodle admin password
 WAIT = 20  # max seconds to wait for page elements
 QUIZ_FOLDER = r'C:\Users\Rajith Sanjaya\OneDrive\Ganith Gatalu\2026\feb\LMS\G4'
 QUIZ_XML_PREFIX = "GG2602G04P"  # files are GG2602G04P01.xml, GG2602G04P02.xml, …
+course_fullname = '04 ශ්‍රේණිය ගණිත ගැටලු Module 2'
+course_shortname = '4 ගණිත ගැටලු Module 2'
+csv_file = 'Ganith Gatalu Feb - Module 2.csv'
+category='2026/Grade 04/ගණිතය'
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -45,10 +49,7 @@ print("════════════════════════�
 print("   Moodle Course Creator")
 print("═══════════════════════════════════\n")
 
-course_fullname = '04 ශ්‍රේණිය ගණිත ගැටලු Module 2'
-course_shortname = '4 ගණිත ගැටලු Module 2'
-csv_file = 'Ganith Gatalu Feb - Module 2.csv'
-category='2026/Grade 04/ගණිතය'
+
 
 # course_fullname = input("Course full name: ").strip()
 # course_shortname = input("Course short name (unique code): ").strip()
@@ -445,7 +446,7 @@ def add_label(course_id: int, section_num: int, label_html: str):
 
 # ─── Step 6: Import questions from XML via Question Bank tab ──────────────────
 
-def import_questions_from_xml(cmid: int, xml_path: str):
+def import_questions_from_xml(cmid: int, xml_path: str, quiz_name: str = ""):
     """Navigate to quiz → Question bank tab → Import dropdown → upload XML."""
     # Go to the quiz view page
     driver.get(f"{MOODLE_BASE}/mod/quiz/view.php?id={cmid}")
@@ -507,6 +508,57 @@ def import_questions_from_xml(cmid: int, xml_path: str):
         except Exception:
             print(f"   ⚠️  Could not select XML format")
             return False
+
+    # Select the import category: "Default for <quiz_name>"
+    if quiz_name:
+        try:
+            # Expand the "General" fieldset if it's collapsed
+            try:
+                general_toggle = driver.find_element(
+                    By.CSS_SELECTOR,
+                    "a[href='#id_generalcontainer'][aria-expanded='false']"
+                )
+                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", general_toggle)
+                time.sleep(0.3)
+                driver.execute_script("arguments[0].click();", general_toggle)
+                time.sleep(1)
+            except Exception:
+                pass  # Already expanded or different structure
+
+            # Uncheck "Get the category from the file" (id_catfromfile)
+            try:
+                catfromfile = driver.find_element(By.ID, "id_catfromfile")
+                if catfromfile.is_selected():
+                    driver.execute_script("arguments[0].click();", catfromfile)
+                    time.sleep(0.3)
+            except Exception:
+                pass
+
+            # Uncheck "Get the context from the file" (id_contextfromfile)
+            try:
+                contextfromfile = driver.find_element(By.ID, "id_contextfromfile")
+                if contextfromfile.is_selected():
+                    driver.execute_script("arguments[0].click();", contextfromfile)
+                    time.sleep(0.3)
+            except Exception:
+                pass
+
+            # Now select the category from the dropdown
+            cat_select = Select(driver.find_element(By.ID, "id_category"))
+            target_text = f"Default for {quiz_name}"
+            matched = False
+            for opt in cat_select.options:
+                opt_text = opt.text.strip()
+                if target_text in opt_text:
+                    cat_select.select_by_value(opt.get_attribute("value"))
+                    matched = True
+                    print(f"   📁 Import category: {opt_text}")
+                    break
+            if not matched:
+                print(f"   ⚠️  Could not find category '{target_text}' – using default")
+            time.sleep(0.5)
+        except Exception:
+            print(f"   ⚠️  Could not select import category – using default")
 
     # Upload the file via "Choose a file..." button → Moodle file picker
     try:
@@ -579,87 +631,262 @@ def import_questions_from_xml(cmid: int, xml_path: str):
 
 def add_all_questions_to_quiz(cmid: int):
     """Go to Questions tab (quiz edit page), click Add → from question bank,
-    select all questions and add them to the quiz."""
+    select all questions and add them to the quiz.
+    Handles pagination: if there are multiple pages of questions,
+    repeats the Add → from question bank → select all → add flow for each page."""
 
-    # Navigate directly to the quiz edit page using cmid
-    driver.get(f"{MOODLE_BASE}/mod/quiz/edit.php?cmid={cmid}")
-    time.sleep(1)
-
-    # Click the "Add" dropdown button
-    try:
-        add_dropdown = wait.until(EC.element_to_be_clickable(
-            (By.CSS_SELECTOR,
-             "a.dropdown-toggle[aria-label='Add'], "
-             "#action-menu-toggle-1, "
-             ".add-menu-outer a.dropdown-toggle")
-        ))
-        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", add_dropdown)
-        time.sleep(0.3)
-        driver.execute_script("arguments[0].click();", add_dropdown)
+    page = 1
+    while True:
+        # Navigate to the quiz edit page
+        driver.get(f"{MOODLE_BASE}/mod/quiz/edit.php?cmid={cmid}")
         time.sleep(1)
-    except Exception:
-        print(f"   ⚠️  Could not find 'Add' dropdown")
-        return
 
-    # Click "from question bank" in the dropdown menu
-    try:
-        from_bank = wait.until(EC.element_to_be_clickable(
-            (By.CSS_SELECTOR,
-             "a[data-action='questionbank'], "
-             "a.questionbank.menu-action")
-        ))
-        driver.execute_script("arguments[0].click();", from_bank)
-        time.sleep(2)
-    except Exception:
-        print(f"   ⚠️  Could not find 'from question bank' option")
-        return
-
-    # Select all questions using the "select all" checkbox
-    try:
-        select_all = wait.until(EC.presence_of_element_located(
-            (By.CSS_SELECTOR,
-             "input[name='selectall'], "
-             "th input[type='checkbox'], "
-             "#qbheadercheckbox, "
-             ".checkbox-toggle-all input[type='checkbox']")
-        ))
-        if not select_all.is_selected():
-            driver.execute_script("arguments[0].click();", select_all)
-            time.sleep(0.5)
-    except Exception:
-        # Try selecting individual question checkboxes
+        # Click the "Add" dropdown button
         try:
-            checkboxes = driver.find_elements(
-                By.CSS_SELECTOR,
-                "input[type='checkbox'][name^='q'], "
-                "td input[type='checkbox']"
-            )
+            add_dropdown = wait.until(EC.element_to_be_clickable(
+                (By.CSS_SELECTOR,
+                 "a.dropdown-toggle[aria-label='Add'], "
+                 "#action-menu-toggle-1, "
+                 ".add-menu-outer a.dropdown-toggle")
+            ))
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", add_dropdown)
+            time.sleep(0.3)
+            driver.execute_script("arguments[0].click();", add_dropdown)
+            time.sleep(1)
+        except Exception:
+            print(f"   ⚠️  Could not find 'Add' dropdown")
+            return
+
+        # Click "from question bank" in the dropdown menu
+        try:
+            from_bank = wait.until(EC.element_to_be_clickable(
+                (By.CSS_SELECTOR,
+                 "a[data-action='questionbank'], "
+                 "a.questionbank.menu-action")
+            ))
+            driver.execute_script("arguments[0].click();", from_bank)
+            time.sleep(2)
+        except Exception:
+            print(f"   ⚠️  Could not find 'from question bank' option")
+            return
+
+        # If this is page 2+, click the correct page number in the pagination
+        if page > 1:
+            try:
+                page_link = wait.until(EC.element_to_be_clickable(
+                    (By.CSS_SELECTOR,
+                     f".categoryquestionscontainer li.page-item[data-page-number='{page}'] a.page-link")
+                ))
+                driver.execute_script("arguments[0].click();", page_link)
+                time.sleep(2)
+            except Exception:
+                # No more pages – we're done
+                print(f"   ✅ All questions added to quiz (no page {page})")
+                return
+
+        # Check if there are any question checkboxes on this page
+        checkboxes = driver.find_elements(
+            By.CSS_SELECTOR,
+            "#categoryquestions input[type='checkbox'][id^='checkq']"
+        )
+        if not checkboxes:
+            if page == 1:
+                print(f"   ⚠️  No questions found in question bank")
+            return
+
+        # Select all questions using the "select all" header checkbox
+        try:
+            select_all = driver.find_element(By.ID, "qbheadercheckbox")
+            if not select_all.is_selected():
+                driver.execute_script("arguments[0].click();", select_all)
+                time.sleep(0.5)
+        except Exception:
+            # Fallback: click each checkbox individually
             for cb in checkboxes:
                 if not cb.is_selected():
                     driver.execute_script("arguments[0].click();", cb)
             time.sleep(0.5)
+
+        num_selected = len(checkboxes)
+
+        # Click "Add selected questions to the quiz"
+        try:
+            add_btn = wait.until(EC.element_to_be_clickable(
+                (By.XPATH,
+                 "//input[@value='Add selected questions to the quiz'] | "
+                 "//button[contains(text(),'Add selected questions')] | "
+                 "//input[contains(@value,'Add to quiz')] | "
+                 "//button[contains(text(),'Add to quiz')]")
+            ))
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", add_btn)
+            time.sleep(0.3)
+            driver.execute_script("arguments[0].click();", add_btn)
+            time.sleep(2)
         except Exception:
-            print(f"   ⚠️  Could not select questions")
+            print(f"   ⚠️  Could not add questions to quiz (page {page})")
             return
 
-    # Click "Add selected questions to the quiz"
-    try:
-        add_btn = wait.until(EC.element_to_be_clickable(
-            (By.XPATH,
-             "//input[@value='Add selected questions to the quiz'] | "
-             "//button[contains(text(),'Add selected questions')] | "
-             "//input[contains(@value,'Add to quiz')] | "
-             "//button[contains(text(),'Add to quiz')]")
-        ))
-        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", add_btn)
-        time.sleep(0.3)
-        driver.execute_script("arguments[0].click();", add_btn)
-        time.sleep(2)
-    except Exception:
-        print(f"   ⚠️  Could not add questions to quiz")
-        return
+        print(f"   ✅ Added {num_selected} questions from page {page}")
+
+        # Check if there's a next page: look for a non-active page item
+        # with a page number greater than the current page
+        has_next = driver.find_elements(
+            By.CSS_SELECTOR,
+            f".categoryquestionscontainer li.page-item[data-page-number='{page + 1}']"
+        )
+        if not has_next:
+            # Also check before we added — the dialog is now closed,
+            # so we can't check. We'll try and the page_link click above
+            # will fail gracefully if there's no next page.
+            # Use a simple heuristic: if we selected exactly 20 (page size),
+            # there might be more.
+            if num_selected < 20:
+                break
+        
+        page += 1
 
     print(f"   ✅ All questions added to quiz")
+
+
+# ─── Step 8: Export (backup) the course to a .mbz file ───────────────────────
+
+def export_course(course_id: int):
+    """Walk through Moodle's backup wizard to download the course as .mbz.
+    
+    The wizard has these steps:
+      1. Initial settings  → click "Next"
+      2. Schema settings   → click "Next"
+      3. Confirmation      → click "Perform backup"
+      4. Complete          → click "Continue"
+      5. User-data area    → click "Download" on the latest backup file
+    """
+    import glob
+
+    print(f"\n📦 Exporting course (ID {course_id}) …")
+
+    # Step 1: Go to backup page
+    driver.get(f"{MOODLE_BASE}/backup/backup.php?id={course_id}")
+    time.sleep(2)
+
+    # Step 1→2: Click "Next" on initial settings
+    try:
+        next_btn = wait.until(EC.element_to_be_clickable(
+            (By.CSS_SELECTOR, "input[type='submit'][value='Next'], button[type='submit']")
+        ))
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", next_btn)
+        time.sleep(0.3)
+        driver.execute_script("arguments[0].click();", next_btn)
+        time.sleep(2)
+    except Exception:
+        print("   ⚠️  Could not proceed past initial settings")
+        return None
+
+    # Step 2→3: Click "Next" on schema settings
+    try:
+        next_btn = wait.until(EC.element_to_be_clickable(
+            (By.CSS_SELECTOR, "input[type='submit'][value='Next'], button[type='submit']")
+        ))
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", next_btn)
+        time.sleep(0.3)
+        driver.execute_script("arguments[0].click();", next_btn)
+        time.sleep(2)
+    except Exception:
+        print("   ⚠️  Could not proceed past schema settings")
+        return None
+
+    # Step 3→4: Click "Perform backup"
+    try:
+        perform_btn = wait.until(EC.element_to_be_clickable(
+            (By.CSS_SELECTOR,
+             "input[type='submit'][value='Perform backup'], "
+             "button[type='submit']")
+        ))
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", perform_btn)
+        time.sleep(0.3)
+        driver.execute_script("arguments[0].click();", perform_btn)
+        # Backup can take a while
+        time.sleep(5)
+    except Exception:
+        print("   ⚠️  Could not click 'Perform backup'")
+        return None
+
+    # Wait for backup to complete — look for success message
+    try:
+        wait.until(EC.presence_of_element_located(
+            (By.XPATH,
+             "//*[contains(text(),'completed successfully')] | "
+             "//*[contains(text(),'backup completed')]")
+        ))
+    except Exception:
+        # May already be done, continue anyway
+        pass
+
+    # Step 4→5: Click "Continue"
+    try:
+        continue_btn = wait.until(EC.element_to_be_clickable(
+            (By.XPATH,
+             "//button[contains(text(),'Continue')] | "
+             "//a[contains(text(),'Continue')] | "
+             "//input[@value='Continue']")
+        ))
+        driver.execute_script("arguments[0].click();", continue_btn)
+        time.sleep(2)
+    except Exception:
+        # Navigate directly to the restore/backup file area
+        driver.get(f"{MOODLE_BASE}/backup/restorefile.php?contextid={course_id}")
+        time.sleep(2)
+
+    # Step 5: Download the backup file
+    # We're now on the backup files page — find the "Download" link for the latest .mbz
+    try:
+        download_link = wait.until(EC.element_to_be_clickable(
+            (By.XPATH,
+             "//a[contains(text(),'Download')] | "
+             "//a[contains(@href,'.mbz')] | "
+             "//a[contains(@href,'backupfilearea')]")
+        ))
+        download_url = download_link.get_attribute("href")
+        driver.execute_script("arguments[0].click();", download_link)
+        time.sleep(3)
+
+        # Wait for download to finish — check browser's download directory
+        # Give it some extra time for larger courses
+        time.sleep(5)
+
+        print(f"   ✅ Course backup downloaded!")
+        print(f"   📥 Check your browser's Downloads folder for the .mbz file")
+
+        # Try to find the downloaded file in common download locations
+        download_dirs = [
+            os.path.expanduser("~/Downloads"),
+            os.path.expandvars(r"%USERPROFILE%\Downloads"),
+        ]
+        for dl_dir in download_dirs:
+            if os.path.isdir(dl_dir):
+                mbz_files = glob.glob(os.path.join(dl_dir, "backup-moodle2-course-*.mbz"))
+                if mbz_files:
+                    latest = max(mbz_files, key=os.path.getmtime)
+                    print(f"   📁 File: {latest}")
+                    return latest
+
+        return download_url
+
+    except Exception:
+        print("   ⚠️  Could not find download link — trying direct download via URL")
+        # Fallback: try to get the backup file URL from the page
+        try:
+            file_links = driver.find_elements(By.CSS_SELECTOR, "a[href*='.mbz']")
+            if file_links:
+                driver.execute_script("arguments[0].click();", file_links[0])
+                time.sleep(5)
+                print(f"   ✅ Course backup download initiated")
+                return True
+        except Exception:
+            pass
+
+        print("   ⚠️  Could not download course backup automatically")
+        print(f"   💡 You can manually export from: {MOODLE_BASE}/backup/backup.php?id={course_id}")
+        return None
 
 
 # ─── Run ─────────────────────────────────────────────────────────────────────
@@ -672,12 +899,13 @@ try:
         print(f"\n📂 Section {i:02d}: {sec['name']}")
 
         create_section(course_id, i, sec["name"])
-        cmid = add_quiz(course_id, i, f"ප්‍රශ්නාවලිය {i:02d}")
+        quiz_name = f"ප්‍රශ්නාවලිය {i:02d}"
+        cmid = add_quiz(course_id, i, quiz_name)
 
         # Import questions from XML and add to quiz
         xml_file = os.path.join(QUIZ_FOLDER, f"{QUIZ_XML_PREFIX}{i:02d}.xml")
         if cmid and os.path.isfile(xml_file):
-            if import_questions_from_xml(cmid, xml_file):
+            if import_questions_from_xml(cmid, xml_file, quiz_name):
                 add_all_questions_to_quiz(cmid)
         elif not os.path.isfile(xml_file):
             print(f"   ⚠️  XML file not found: {os.path.basename(xml_file)}")
@@ -697,6 +925,9 @@ try:
             else:
                 html = f'<p><a href="{sec["yt_link"]}" target="_blank">{sec["yt_link"]}</a></p>'
             add_label(course_id, i, html)
+
+    # Export the course to .mbz for uploading to another Moodle instance
+    export_course(course_id)
 
     print(f"\n{'═'*50}")
     print(f"🎉 Done! Course: {MOODLE_BASE}/course/view.php?id={course_id}")
