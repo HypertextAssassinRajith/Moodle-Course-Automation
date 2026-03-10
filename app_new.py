@@ -9,10 +9,8 @@ Uses Selenium browser automation because standard Moodle Web Service
 APIs do NOT have functions to add quiz/label modules.
 """
 
-import csv
 import re
 import time
-import os
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -22,9 +20,9 @@ from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 
 # ─── Configuration ───────────────────────────────────────────────────────────
-MOODLE_BASE = "http://localhost"  # local testing; change to "https://samanalaeschool.lk" for production
+MOODLE_BASE = "https://samanalaeschool.lk"
 ADMIN_USER = "admin"          # ← your Moodle admin username
-ADMIN_PASS = "Sanjaya11@"  # ← your Moodle admin password
+ADMIN_PASS = "your_password"  # ← your Moodle admin password
 WAIT = 20  # max seconds to wait for page elements
 
 
@@ -43,38 +41,17 @@ print("════════════════════════�
 print("   Moodle Course Creator")
 print("═══════════════════════════════════\n")
 
-course_fullname = '04 ශ්‍රේණිය ගණිත ගැටලු Module 2'
-course_shortname = '4 ගණිත ගැටලු Module 2'
-csv_file = 'Ganith Gatalu Feb - Module 2.csv'
-
-# course_fullname = input("Course full name: ").strip()
-# course_shortname = input("Course short name (unique code): ").strip()
-# csv_file = input("CSV file path (activity name, youtube link): ").strip().strip('"')
-
-# Read sections from CSV
-if not os.path.isfile(csv_file):
-    print(f"❌ File not found: {csv_file}")
-    exit(1)
+course_fullname = input("Course full name: ").strip()
+course_shortname = input("Course short name (unique code): ").strip()
+num_sections = int(input("How many activity sections? ").strip())
 
 sections_data: list[dict] = []
-with open(csv_file, newline="", encoding="utf-8") as f:
-    reader = csv.reader(f)
-    for row in reader:
-        if len(row) >= 2:
-            sections_data.append({"name": row[0].strip(), "yt_link": row[1].strip()})
-        elif len(row) == 1:
-            sections_data.append({"name": row[0].strip(), "yt_link": ""})
-
-num_sections = len(sections_data)
-
-if num_sections == 0:
-    print("❌ CSV file is empty!")
-    exit(1)
-
-print(f"\n📋 Loaded {num_sections} sections from CSV:")
-for i, sec in enumerate(sections_data, 1):
-    yt_short = sec["yt_link"][:50] + "…" if len(sec["yt_link"]) > 50 else sec["yt_link"]
-    print(f"   {i:02d}. {sec['name']}  →  {yt_short or '(no video)'}")
+for i in range(1, num_sections + 1):
+    name = input(f"  Section {i:02d} name (Enter for 'ක්‍රියාකාරකම් {i:02d}'): ").strip()
+    if not name:
+        name = f"ක්‍රියාකාරකම් {i:02d}"
+    yt = input(f"  YouTube link for section {i:02d} (Enter to skip): ").strip()
+    sections_data.append({"name": name, "yt_link": yt})
 
 print(f"\n🚀 Launching browser …\n")
 
@@ -92,27 +69,10 @@ wait = WebDriverWait(driver, WAIT)
 
 def moodle_login():
     driver.get(f"{MOODLE_BASE}/login/index.php")
+    wait.until(EC.presence_of_element_located((By.ID, "username"))).send_keys(ADMIN_USER)
+    driver.find_element(By.ID, "password").send_keys(ADMIN_PASS)
+    driver.find_element(By.ID, "loginbtn").click()
     time.sleep(2)
-
-    # Wait for username field to be visible and interactable
-    username_field = wait.until(EC.element_to_be_clickable((By.ID, "username")))
-    username_field.clear()
-    username_field.send_keys(ADMIN_USER)
-
-    # Wait for password field to be visible and interactable
-    password_field = wait.until(EC.element_to_be_clickable((By.ID, "password")))
-    password_field.clear()
-    password_field.send_keys(ADMIN_PASS)
-
-    # Click login
-    login_btn = wait.until(EC.element_to_be_clickable((By.ID, "loginbtn")))
-    login_btn.click()
-    time.sleep(3)
-
-    # Verify login succeeded (check we're no longer on the login page)
-    if "/login/" in driver.current_url:
-        raise RuntimeError("Login failed – check ADMIN_USER / ADMIN_PASS in the script")
-
     print("✅ Logged in to Moodle\n")
 
 
@@ -134,7 +94,7 @@ def create_course() -> int:
     try:
         header = driver.find_element(By.XPATH, "//*[contains(@id,'courseformat')]//a | //*[contains(@id,'courseformat')]/..")
         if header.get_attribute("aria-expanded") == "false":
-            driver.execute_script("arguments[0].click();", header)
+            header.click()
             time.sleep(0.5)
     except Exception:
         pass
@@ -145,12 +105,7 @@ def create_course() -> int:
     except Exception:
         pass
 
-    # Scroll to the save button and click it
-    save_btn = driver.find_element(By.ID, "id_saveanddisplay")
-    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", save_btn)
-    time.sleep(0.5)
-    driver.execute_script("arguments[0].click();", save_btn)
-
+    driver.find_element(By.ID, "id_saveanddisplay").click()
     wait.until(EC.url_contains("/course/view.php"))
 
     cid = int(re.search(r"id=(\d+)", driver.current_url).group(1))
@@ -237,14 +192,11 @@ def add_quiz(course_id: int, section_num: int, quiz_name: str):
     name_field.clear()
     name_field.send_keys(quiz_name)
 
-    # Scroll to save button and click via JS to avoid interception
+    # Save and return to course
     try:
-        save_btn = driver.find_element(By.ID, "id_submitbutton2")
+        driver.find_element(By.ID, "id_submitbutton2").click()
     except Exception:
-        save_btn = driver.find_element(By.ID, "id_submitbutton")
-    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", save_btn)
-    time.sleep(0.3)
-    driver.execute_script("arguments[0].click();", save_btn)
+        driver.find_element(By.ID, "id_submitbutton").click()
 
     wait.until(EC.url_contains("/course/view.php"))
     time.sleep(0.5)
@@ -282,12 +234,9 @@ def add_label(course_id: int, section_num: int, label_html: str):
 
     # Save
     try:
-        save_btn = driver.find_element(By.ID, "id_submitbutton2")
+        driver.find_element(By.ID, "id_submitbutton2").click()
     except Exception:
-        save_btn = driver.find_element(By.ID, "id_submitbutton")
-    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", save_btn)
-    time.sleep(0.3)
-    driver.execute_script("arguments[0].click();", save_btn)
+        driver.find_element(By.ID, "id_submitbutton").click()
 
     wait.until(EC.url_contains("/course/view.php"))
     time.sleep(0.5)
