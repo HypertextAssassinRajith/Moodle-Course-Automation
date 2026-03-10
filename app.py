@@ -373,13 +373,13 @@ try:
         print(f"\n📂 Section {i:02d}: {sec['name']}")
 
         create_section(course_id, i, sec["name"])
-        add_quiz(course_id, i, f"Quiz {i:02d}")
+        add_quiz(course_id, i, f"ප්‍රශ්නාවලිය {i:02d}")
 
         if sec["yt_link"]:
             yt_id = extract_youtube_id(sec["yt_link"])
             if yt_id:
                 html = (
-                    f'<p>Quiz {i:02d} සඳහා video පාඩම</p>'
+                    f'<p>ප්‍රශ්නාවලිය {i:02d} සඳහා video පාඩම</p>'
                     f'<div class="embed-responsive embed-responsive-16by9">'
                     f'<iframe src="https://www.youtube.com/embed/{yt_id}" '
                     f'width="560" height="315" frameborder="0" '
