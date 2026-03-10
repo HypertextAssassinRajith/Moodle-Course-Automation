@@ -138,8 +138,7 @@ def create_course() -> int:
 
         # Click the collapsed toggle link to expand the section
         toggle = fieldset.find_element(
-            By.CSS_SELECTOR,
-            "a[data-bs-toggle='collapse'][aria-expanded='false']"
+            By.CSS_SELECTOR,"a[data-bs-toggle='collapse'][aria-expanded='false']"
         )
         driver.execute_script("arguments[0].click();", toggle)
         time.sleep(1)
@@ -206,30 +205,92 @@ def turn_editing_on(course_id: int):
         print("⚠️  Could not toggle editing mode – continuing anyway\n")
 
 
-# ─── Step 4: Rename a section ────────────────────────────────────────────────
+# ─── Step 4: Add a new section and rename it ─────────────────────────────────
 
-def rename_section(course_id: int, section_num: int, new_name: str):
+def create_section(course_id: int, section_num: int, new_name: str):
+    """Click 'Add section' to create a new section, then rename it via the pencil icon."""
+    driver.get(f"{MOODLE_BASE}/course/view.php?id={course_id}")
+    time.sleep(1)
+
+    # --- Click "Add section" button ---
+    try:
+        add_btn = wait.until(EC.element_to_be_clickable(
+            (By.CSS_SELECTOR, "a[data-action='addSection']")
+        ))
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", add_btn)
+        time.sleep(0.3)
+        driver.execute_script("arguments[0].click();", add_btn)
+        time.sleep(2)  # wait for new section to appear
+    except Exception:
+        # Fallback: direct URL
+        try:
+            sesskey = driver.execute_script(
+                "return document.querySelector('input[name=\"sesskey\"]')?.value || M.cfg.sesskey;"
+            )
+            driver.get(
+                f"{MOODLE_BASE}/course/changenumsections.php?courseid={course_id}"
+                f"&insertsection=0&sesskey={sesskey}"
+            )
+            time.sleep(2)
+        except Exception:
+            print(f"   ⚠️  Could not add section {section_num}")
+            return
+
+    # --- Rename the newly added section via pencil icon ---
+    # The new section is the last li[id^='section-'] on the page
     driver.get(f"{MOODLE_BASE}/course/view.php?id={course_id}")
     time.sleep(1)
 
     try:
-        editable = driver.find_element(
+        # Find the last section's pencil icon
+        section = driver.find_element(
             By.CSS_SELECTOR,
-            f"li#section-{section_num} [data-itemtype='sectionname']"
+            f"li#section-{section_num} .quickediticon"
         )
-        editable.click()
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", section)
+        time.sleep(0.3)
+        driver.execute_script("arguments[0].click();", section)
         time.sleep(0.5)
 
+        # Wait for the inline input field to appear and type the new name
         inp = wait.until(EC.presence_of_element_located(
-            (By.CSS_SELECTOR, f"li#section-{section_num} [data-itemtype='sectionname'] input")
+            (By.CSS_SELECTOR, f"li#section-{section_num} .inplaceeditable input[type='text']")
         ))
         inp.clear()
         inp.send_keys(new_name)
         inp.send_keys(Keys.RETURN)
         time.sleep(0.5)
-        print(f"   ✏️  Section renamed → '{new_name}'")
+        print(f"   ✏️  Section {section_num} created & renamed → '{new_name}'")
     except Exception:
-        print(f"   ⚠️  Could not inline-rename section {section_num}")
+        # Fallback: try editsection.php
+        try:
+            section_el = driver.find_element(By.CSS_SELECTOR, f"li#section-{section_num}")
+            section_db_id = section_el.get_attribute("data-id") or section_el.get_attribute("data-sectionid")
+            if section_db_id:
+                driver.get(f"{MOODLE_BASE}/course/editsection.php?id={section_db_id}")
+                time.sleep(1)
+                # Uncheck "Use default section name" if present
+                try:
+                    cb = driver.find_element(By.ID, "id_name_customize")
+                    if not cb.is_selected():
+                        driver.execute_script("arguments[0].click();", cb)
+                        time.sleep(0.3)
+                except Exception:
+                    pass
+                name_field = wait.until(EC.presence_of_element_located((By.ID, "id_name_value")))
+                name_field.clear()
+                name_field.send_keys(new_name)
+                save_btn = driver.find_element(By.ID, "id_submitbutton")
+                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", save_btn)
+                time.sleep(0.3)
+                driver.execute_script("arguments[0].click();", save_btn)
+                wait.until(EC.url_contains("/course/view.php"))
+                time.sleep(0.5)
+                print(f"   ✏️  Section {section_num} created & renamed (via edit page) → '{new_name}'")
+            else:
+                print(f"   ⚠️  Section {section_num} created but could not rename")
+        except Exception:
+            print(f"   ⚠️  Section {section_num} created but could not rename")
 
 
 # ─── Step 5: Add activity via the "add module" URL shortcut ──────────────────
@@ -311,7 +372,7 @@ try:
     for i, sec in enumerate(sections_data, start=1):
         print(f"\n📂 Section {i:02d}: {sec['name']}")
 
-        rename_section(course_id, i, sec["name"])
+        create_section(course_id, i, sec["name"])
         add_quiz(course_id, i, f"Quiz {i:02d}")
 
         if sec["yt_link"]:
