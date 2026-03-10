@@ -629,13 +629,14 @@ def import_questions_from_xml(cmid: int, xml_path: str, quiz_name: str = ""):
 
 # ─── Step 7: Add all imported questions to a quiz ────────────────────────────
 
-def add_all_questions_to_quiz(cmid: int):
+def add_all_questions_to_quiz(cmid: int, quiz_name: str = ""):
     """Go to Questions tab (quiz edit page), click Add → from question bank,
     select all questions and add them to the quiz.
     Handles pagination: if there are multiple pages of questions,
     repeats the Add → from question bank → select all → add flow for each page."""
 
     page = 1
+    category_selected = False  # only need to select category once (page 1)
     while True:
         # Navigate to the quiz edit page
         driver.get(f"{MOODLE_BASE}/mod/quiz/edit.php?cmid={cmid}")
@@ -669,6 +670,65 @@ def add_all_questions_to_quiz(cmid: int):
         except Exception:
             print(f"   ⚠️  Could not find 'from question bank' option")
             return
+
+        # Select the correct category from the autocomplete dropdown
+        # (Moodle autocomplete widget: input[data-fieldtype='autocomplete'] + downarrow)
+        if quiz_name and not category_selected:
+            target_text = f"Default for {quiz_name}"
+            try:
+                # Click the ▼ arrow to open the autocomplete suggestions list
+                arrow = wait.until(EC.element_to_be_clickable(
+                    (By.CSS_SELECTOR,
+                     ".modal-dialog span.form-autocomplete-downarrow, "
+                     "#modal-footer span.form-autocomplete-downarrow, "
+                     "span.form-autocomplete-downarrow")
+                ))
+                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", arrow)
+                time.sleep(0.3)
+                driver.execute_script("arguments[0].click();", arrow)
+                time.sleep(1)
+
+                # Find all <li role="option"> in the suggestions list
+                options = wait.until(EC.presence_of_all_elements_located(
+                    (By.CSS_SELECTOR, "ul.form-autocomplete-suggestions li[role='option']")
+                ))
+
+                matched = False
+                for opt in options:
+                    opt_text = opt.text.strip()
+                    if target_text in opt_text:
+                        driver.execute_script("arguments[0].click();", opt)
+                        time.sleep(1)
+                        print(f"   📁 Question bank category: {opt_text}")
+                        matched = True
+                        category_selected = True
+                        break
+
+                if not matched:
+                    # Try matching just the quiz name as fallback
+                    for opt in options:
+                        opt_text = opt.text.strip()
+                        if quiz_name in opt_text and "Default" in opt_text:
+                            driver.execute_script("arguments[0].click();", opt)
+                            time.sleep(1)
+                            print(f"   📁 Question bank category: {opt_text}")
+                            category_selected = True
+                            break
+
+                # Click "Apply filters" button to refresh the question list
+                try:
+                    apply_btn = wait.until(EC.element_to_be_clickable(
+                        (By.XPATH,
+                         "//input[@value='Apply filters'] | "
+                         "//button[contains(text(),'Apply filters')]")
+                    ))
+                    driver.execute_script("arguments[0].click();", apply_btn)
+                    time.sleep(2)
+                except Exception:
+                    pass  # May auto-filter on selection
+
+            except Exception as e:
+                print(f"   ⚠️  Could not select question bank category: {e}")
 
         # If this is page 2+, click the correct page number in the pagination
         if page > 1:
@@ -906,7 +966,7 @@ try:
         xml_file = os.path.join(QUIZ_FOLDER, f"{QUIZ_XML_PREFIX}{i:02d}.xml")
         if cmid and os.path.isfile(xml_file):
             if import_questions_from_xml(cmid, xml_file, quiz_name):
-                add_all_questions_to_quiz(cmid)
+                add_all_questions_to_quiz(cmid, quiz_name)
         elif not os.path.isfile(xml_file):
             print(f"   ⚠️  XML file not found: {os.path.basename(xml_file)}")
 
