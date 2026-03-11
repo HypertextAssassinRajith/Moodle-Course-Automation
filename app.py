@@ -13,6 +13,7 @@ import csv
 import re
 import time
 import os
+from dotenv import load_dotenv
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -21,17 +22,19 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 
-# ─── Configuration ───────────────────────────────────────────────────────────
-MOODLE_BASE = "http://localhost"  # local testing; change to "https://samanalaeschool.lk" for production
-ADMIN_USER = "admin"          # ← your Moodle admin username
-ADMIN_PASS = "Sanjaya11@"  # ← your Moodle admin password
-WAIT = 20  # max seconds to wait for page elements
-QUIZ_FOLDER = r'C:\Users\Rajith Sanjaya\OneDrive\Ganith Gatalu\2026\feb\LMS\G4'
-QUIZ_XML_PREFIX = "GG2602G04P"  # files are GG2602G04P01.xml, GG2602G04P02.xml, …
-course_fullname = '04 ශ්‍රේණිය ගණිත ගැටලු Module 2'
-course_shortname = '4 ගණිත ගැටලු Module 2'
-csv_file = 'Ganith Gatalu Feb - Module 2.csv'
-category='2026/Grade 04/ගණිතය'
+load_dotenv()
+
+# ─── Configuration (loaded from .env) ────────────────────────────────────────
+MOODLE_BASE = os.getenv('MOODLE_BASE', 'http://localhost')
+ADMIN_USER = os.getenv('ADMIN_USER', '')
+ADMIN_PASS = os.getenv('ADMIN_PASS', '')
+WAIT = int(os.getenv('WAIT', '20'))
+QUIZ_FOLDER = os.getenv('QUIZ_FOLDER', '')
+QUIZ_XML_PREFIX = os.getenv('QUIZ_XML_PREFIX', '')
+course_fullname = os.getenv('COURSE_FULLNAME', '')
+course_shortname = os.getenv('COURSE_SHORTNAME', '')
+csv_file = os.getenv('CSV_FILE', '')
+category = os.getenv('CATEGORY', '')
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
